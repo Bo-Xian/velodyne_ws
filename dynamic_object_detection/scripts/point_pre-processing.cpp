@@ -17,7 +17,7 @@
 
 using namespace std;
 
-int ros_hz = 1;
+int ros_hz = 3;
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 typedef pcl::PointCloud<pcl::PointXYZRGB> PointCloudRGB;
@@ -25,29 +25,40 @@ typedef pcl::PointCloud<pcl::PointXYZRGB> PointCloudRGB;
 queue <float> point_x, point_y, point_z;
 double position[3];
 
-double lidar_height = 1.1;
-int Ransac_iter_times = 1000;
-double Ransac_range = 0.15;//meters
-double Ground_error = 0.2;
-double detect_range = 5.5;
-int point_sim_pieces = 40;
-int lattice_min_density = 2;
-int rotate_angle_gap = 10;
-double box_error_endure = 0.1;
+double lidar_height = 1.1; // meters
+int Ransac_iter_times = 1000; // times
+double Ransac_range = 0.15; // meters
+double Ground_error = 0.2; // meters
+double Ground_plane_error = 10.0; // degree
+double Wall_plane_error = 80.0; // degree
+double Wall_error = 0.2; // meters
+double Wall_min_size = 1*3; // meters*meters
+double wall_min_density = 0.4; // percent/100
+double detect_range = 5.5; // meters
+int point_sim_pieces = 40;  // pieces*pieces
+int lattice_min_density = 2; // points per square
+int rotate_angle_gap = 10;  // degrees
+double box_error_endure = 0.1; // meters
 int max_object_number = 10;
-double static_to_unstable_error = 0.4; // meters/sec
-double unstable_to_dynanic_error = 0.6; // meters/sec
+double static_to_unstable_error = 0.8; // meters/sec
+double unstable_to_dynanic_error = 1.2; // meters/sec
 double same_item_error = 10.0; // meters/sec
 int max_wall_num = 4;
+int wall_slice_pieces = 20;  // pieces*pieces
+
 
 queue <float> place_record_1_x = {}; // last time
 queue <float> place_record_1_y = {}; // last time
 queue <float> place_record_2_x = {}; // last last time
 queue <float> place_record_2_y = {}; // last last time
+queue <float> place_record_3_x = {}; // last last last time
+queue <float> place_record_3_y = {}; // last last last time
 
 float test_x = -1.05551;
 float test_y = 4.1879242;
 float test_z = -0.0879242;
+
+queue <float> test_x_p, test_y_p, test_z_p;
 
 double Cal_dis(double x,double y,double z, double a, double b, double c){
     return sqrt((x-a)*(x-a)+(y-b)*(y-b)+(z-c)*(z-c));
@@ -73,7 +84,7 @@ double Box_rotate_x(double x_center,double y_center,double angle,double x,double
     double R_y = y - y_center;
 
     double new_x = x_center + R_x*cos(angle*M_PI/180) - R_y*sin(angle*M_PI/180);
-    double new_y = y_center + R_x*sin(angle*M_PI/180) + R_y*cos(angle*M_PI/180);
+    // double new_y = y_center + R_x*sin(angle*M_PI/180) + R_y*cos(angle*M_PI/180);
 
     return new_x;
 }
@@ -82,10 +93,34 @@ double Box_rotate_y(double x_center,double y_center,double angle,double x,double
     double R_x = x - x_center;
     double R_y = y - y_center;
 
-    double new_x = x_center + R_x*cos(angle*M_PI/180) - R_y*sin(angle*M_PI/180);
+    // double new_x = x_center + R_x*cos(angle*M_PI/180) - R_y*sin(angle*M_PI/180);
     double new_y = y_center + R_x*sin(angle*M_PI/180) + R_y*cos(angle*M_PI/180);
 
     return new_y;
+}
+
+double angle_with_plane_and_plane(double x1, double y1, double z1,double x2, double y2, double z2){
+    return acos((x1*x2+y1*y2+z1*z2)/(sqrt(x1*x1+y1*y1+z1*z1)*sqrt(x2*x2+y2*y2+z2*z2)))*180/M_PI;
+}
+
+double point_to_plane_distance(double a, double b, double c, double d, double x, double y, double z){
+    // positive => above plane
+    // negative => below plane
+    return abs((a*x+b*y+c*z+d)/sqrt(a*a+b*b+c*c));
+}
+
+double project_point_to_plane(double a, double b, double c, double d, double x, double y, double z, int options){
+    double t = (-d-a*x-b*y-c*z)/(a*a+b*b+c*c);
+    if(options==0){
+        return x + a*t;
+    }else if(options==1){
+        return y + b*t;
+    }else if(options==2){
+        return z + c*t;
+    }else{
+        cout<<"project_point_to_plane error";
+        return 0;
+    }
 }
 
 void Sub_pcl(const PointCloud::ConstPtr& msg){
@@ -165,7 +200,7 @@ void Pub_pcl_test(queue <float> x,queue <float> y, queue <float> z,ros::Publishe
         pcl::PointXYZRGB p;
         p.x = x.front();
         p.y = y.front();
-        p.z = 0;
+        p.z = z.front();
         // p.z = z.front()+lidar_height;
         p.r = 255;
         p.g = 0;
@@ -195,15 +230,11 @@ void Pub_a_pcl_test(double x,double y, double z,ros::Publisher pub_topic){
     pub_topic.publish (msg);
 }
 
-void Pub_plane(double data_A,double data_B, double data_C, double data_D, ros::Publisher pub_topic){
-
-    // ROS_INFO("abcd = %f , %f , %f , %f", data_A, data_B, data_C, data_D);
+void Pub_ground(double data_A,double data_B, double data_C, double data_D, ros::Publisher pub_topic){
 
     //  calculate orientation_x & orientation_y
     double ori_x = acos(data_B/sqrt(data_B*data_B+data_C*data_C))*180/M_PI;
     double ori_y = acos(data_A/sqrt(data_A*data_A+data_C*data_C))*180/M_PI;
-
-    // cout <<"1xx = "<<ori_x<<"  "<<"yy = "<< ori_y<<endl;
 
     ori_x = ori_x-90;
     ori_y = 90-ori_y;
@@ -223,6 +254,21 @@ void Pub_plane(double data_A,double data_B, double data_C, double data_D, ros::P
         ori_y = (ori_y-180)/90.0;
     }
 
+    double ww,rr,gg,bb,aa;
+    if(data_A!=0 && data_B!=0 && data_C!=0 && data_D!=0){
+        ww = detect_range*2;
+        rr = 0.929;
+        gg = 0.992;
+        bb = 0.984;
+        aa = 0.2;
+    }else{
+        ww = 0.001;
+        rr = 0.001;
+        gg = 0.001;
+        bb = 0.001;
+        aa = 0.001;
+    }
+
     visualization_msgs::Marker marker;
     marker.header.frame_id = "velodyne";
     marker.header.stamp = ros::Time();
@@ -237,13 +283,13 @@ void Pub_plane(double data_A,double data_B, double data_C, double data_D, ros::P
     marker.pose.orientation.y = ori_y;
     marker.pose.orientation.z = 0.0;
     marker.pose.orientation.w = 1.0;
-    marker.scale.x = detect_range*2;
-    marker.scale.y = detect_range*2;
+    marker.scale.x = ww;
+    marker.scale.y = ww;
     marker.scale.z = 0.04;
-    marker.color.a = 0.1;
-    marker.color.r = 0.929;
-    marker.color.g = 0.992;
-    marker.color.b = 0.984;
+    marker.color.a = aa;
+    marker.color.r = rr;
+    marker.color.g = gg;
+    marker.color.b = bb;
     pub_topic.publish( marker);
 }
 
@@ -261,7 +307,11 @@ void Pub_walls(queue <float> w_x,queue <float> w_y, queue <float> w_lenth, queue
         in_y[i] = w_y.front();
         in_l[i] = w_lenth.front();
         in_h[i] = w_height.front();
-        in_a[i] = w_angle.front();
+        if(w_angle.front()<90){
+            in_a[i] = w_angle.front();
+        }else{
+            in_a[i] = w_angle.front()-180;
+        }
         w_x.pop();
         w_y.pop();
         w_lenth.pop();
@@ -269,7 +319,7 @@ void Pub_walls(queue <float> w_x,queue <float> w_y, queue <float> w_lenth, queue
         w_angle.pop();
     }
 
-    for(int i=0; i<queue_size; i++){
+    for(int i=0; i<max_wall_num; i++){
         visualization_msgs::Marker marker;
         marker.header.frame_id = "world";
         marker.header.stamp = ros::Time();
@@ -277,20 +327,37 @@ void Pub_walls(queue <float> w_x,queue <float> w_y, queue <float> w_lenth, queue
         marker.id = i;
         marker.type = visualization_msgs::Marker::CUBE;
         marker.action = visualization_msgs::Marker::ADD;
-        marker.pose.position.x = in_x[i];
-        marker.pose.position.y = in_y[i];
-        marker.pose.position.z = in_h[i]/2;
-        marker.pose.orientation.x = 0.0;
-        marker.pose.orientation.y = 0.0;
-        marker.pose.orientation.z = in_a[i]/90;
-        marker.pose.orientation.w = 1.0;
-        marker.scale.x = in_l[i];
-        marker.scale.y = 0.1;
-        marker.scale.z = in_h[i];
-        marker.color.a = 0.7;
-        marker.color.r = 0.8;
-        marker.color.g = 0.678;
-        marker.color.b = 1.0;
+        if(i<queue_size){
+            marker.pose.position.x = in_x[i];
+            marker.pose.position.y = in_y[i];
+            marker.pose.position.z = in_h[i]/2;
+            marker.pose.orientation.x = 0.0;
+            marker.pose.orientation.y = 0.0;
+            marker.pose.orientation.z = in_a[i]/90;
+            marker.pose.orientation.w = 1.0;
+            marker.scale.x = in_l[i];
+            marker.scale.y = 0.2;
+            marker.scale.z = in_h[i];
+            marker.color.a = 0.8;
+            marker.color.r = 0.8;
+            marker.color.g = 0.678;
+            marker.color.b = 1.0;
+        }else{
+            marker.pose.position.x = 0;
+            marker.pose.position.y = 0;
+            marker.pose.position.z = 0;
+            marker.pose.orientation.x = 0.0;
+            marker.pose.orientation.y = 0.0;
+            marker.pose.orientation.z = 0;
+            marker.pose.orientation.w = 1.0;
+            marker.scale.x = 0.0001;
+            marker.scale.y = 0.0001;
+            marker.scale.z = 0.0001;
+            marker.color.a = 0.0001;
+            marker.color.r = 0.0001;
+            marker.color.g = 0.0001;
+            marker.color.b = 0.0001;
+        }
         pub_topic.publish( marker);
     }
 }
@@ -650,186 +717,341 @@ void Pub_dynamic_box(queue <float> x, queue <float> y ,queue <float> angle, queu
     pub_topic.publish(line_list);
 }
 
-void Remove_ground(queue <float> x,queue <float> y, queue <float> z, queue <float>& out_x,queue <float>& out_y, queue <float>& out_z, double &out_A,double &out_B, double &out_C, double &out_D){
-
-    double in_x[x.size()];
-    double in_y[y.size()];
-    double in_z[z.size()];
-    int queue_size = x.size();
+void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, queue <float>& out_x,queue <float>& out_y, queue <float>& out_z, double &out_A,double &out_B, double &out_C, double &out_D, queue <float>& wall_x, queue <float>& wall_y, queue <float>& wall_lenth, queue <float>& wall_height, queue <float>& wall_angle){
+    int all_points_size = x.size();
     double best_plane_p1[3];
     double best_plane_p2[3];
     double best_plane_p3[3];
-    int best_count = 0;
-
-    // ROS_INFO("size of queue = %ld",x.size());
-
-    //data reshape
-    for(int i=0;i<queue_size;i++){
-        in_x[i] = x.front();
-        in_y[i] = y.front();
-        in_z[i] = z.front();
-        x.pop();
-        y.pop();
-        z.pop();
-    }
-
-    // RANSAC
-    for(int w=0;w<Ransac_iter_times;w++){
-        // pick three points
-        clock_t time_now = clock();
-        int random_num1 = int(time_now/(double)CLOCKS_PER_SEC*1000000);
-        int p1 = random_num1%(queue_size+1);
-        int random_num2 = int(time_now/(double)CLOCKS_PER_SEC*100000);
-        int p2 = random_num1%(queue_size+1);
-        int random_num3 = int(time_now/(double)CLOCKS_PER_SEC*10000);
-        int p3 = random_num1%(queue_size+1);
-        if(p1==p2 || p2==p3 || p1 == p3){
-            p1 = rand()%(queue_size+1);
-            p2 = rand()%(queue_size+1);
-            p3 = rand()%(queue_size+1);
-        }
-        // ROS_INFO("time = %d",random_num1);
-        // ROS_INFO("time = %d",random_num2);
-        // ROS_INFO("time = %d",random_num3);
-        // ROS_INFO("p1=%d, p2=%d, p3=%d",p1,p2,p3);
-
-        // three point to plane
-        double x1 = in_x[p1];
-        double y1 = in_y[p1];
-        double z1 = in_z[p1];
-        double x2 = in_x[p2];
-        double y2 = in_y[p2];
-        double z2 = in_z[p2];
-        double x3 = in_x[p3];
-        double y3 = in_y[p3];
-        double z3 = in_z[p3];
-
-        double A = (y2 - y1)*(z3 - z1) - (z2 - z1)*(y3 - y1);
-        double B = (x3 - x1)*(z2 - z1) - (x2 - x1)*(z3 - z1);
-        double C = (x2 - x1)*(y3 - y1) - (x3 - x1)*(y2 - y1);
-        double D = -(A * x1 + B * y1 + C * z1);
-
-        // ROS_INFO("x1=%f, y1=%f, z1=%f",x1,y1,z1);
-        // ROS_INFO("x2=%f, y2=%f, z2=%f",x2,y2,z2);
-        // ROS_INFO("x3=%f, y3=%f, z3=%f",x3,y3,z3);
-        // ROS_INFO("A=%f, B=%f, C=%f, D=%f",A/C,B/C,C/C,D/C);
-
-        // count points in range
-        int count_in_range = 0;
-        for(int i=0;i<queue_size;i++){
-            double dis = fabs((A*in_x[i] + B*in_y[i] + C*in_z[i] + D ) / sqrt(A*A + B*B + C*C));
-            // ROS_INFO("dis = %f",dis);
-            if(dis<Ransac_range){
-                count_in_range = count_in_range + 1;
-            }
-        }
-        // ROS_INFO("in range points = %d",count_in_range);
-
-        if(count_in_range>best_count){
-            best_plane_p1[0] = in_x[p1];
-            best_plane_p1[1] = in_y[p1];
-            best_plane_p1[2] = in_z[p1];
-            best_plane_p2[0] = in_x[p2];
-            best_plane_p2[1] = in_y[p2];
-            best_plane_p2[2] = in_z[p2];
-            best_plane_p3[0] = in_x[p3];
-            best_plane_p3[1] = in_y[p3];
-            best_plane_p3[2] = in_z[p3];
-            best_count = count_in_range;
-            // ROS_INFO("best change from %d to %d",best_count,count_in_range);
-        }
-    }
-
-    // best plane parameters
-    double best_A = (best_plane_p2[1] - best_plane_p1[1])*(best_plane_p3[2] - best_plane_p1[2]) - (best_plane_p2[2] - best_plane_p1[2])*(best_plane_p3[1] - best_plane_p1[1]);
-    double best_B = (best_plane_p3[0] - best_plane_p1[0])*(best_plane_p2[2] - best_plane_p1[2]) - (best_plane_p2[0] - best_plane_p1[0])*(best_plane_p3[2] - best_plane_p1[2]);
-    double best_C = (best_plane_p2[0] - best_plane_p1[0])*(best_plane_p3[1] - best_plane_p1[1]) - (best_plane_p3[0] - best_plane_p1[0])*(best_plane_p2[1] - best_plane_p1[1]);
-    double best_D = -(best_A * best_plane_p1[0] + best_B * best_plane_p1[1] + best_C * best_plane_p1[2]);
-
-    // ROS_INFO("x1=%f, y1=%f, z1=%f",best_plane_p1[0],best_plane_p1[1],best_plane_p1[2]);
-    // ROS_INFO("x2=%f, y2=%f, z2=%f",best_plane_p2[0],best_plane_p2[1],best_plane_p2[2]);
-    // ROS_INFO("x3=%f, y3=%f, z3=%f",best_plane_p3[0],best_plane_p3[1],best_plane_p3[2]);
-    // ROS_INFO("A=%f, B=%f, C=%f, D=%f",best_A/best_C,best_B/best_C,best_C/best_C,best_D/best_C);
-
-    // ROS_INFO("points around plane = %d",best_count);
-
-    out_A = best_A/best_C;
-    out_B = best_B/best_C;
-    out_C = best_C/best_C;
-    out_D = best_D/best_C;
-    // ROS_INFO("oA=%f, oB=%f, oC=%f, oD=%f",out_A,out_B,out_C,out_D);
-
-    // show three points
-    // out_x = {};
-    // out_y = {};
-    // out_z = {};
-    // out_x.push(best_plane_p1[0]);
-    // out_x.push(best_plane_p2[0]);
-    // out_x.push(best_plane_p3[0]);
-    // out_y.push(best_plane_p1[1]);
-    // out_y.push(best_plane_p2[1]);
-    // out_y.push(best_plane_p3[1]);
-    // out_z.push(best_plane_p1[2]);
-    // out_z.push(best_plane_p2[2]);
-    // out_z.push(best_plane_p3[2]);
-
-    // remove ground
+    int best_count;
+    bool find_ground_flag = false;
+    out_A = 0;
+    out_B = 0;
+    out_C = 0;
+    out_D = 0;
     out_x = {};
     out_y = {};
     out_z = {};
-    for(int k=0;k<queue_size;k++){
-        if((in_z[k]>=Ground_error+(out_A*in_x[k]+out_B*in_y[k]+out_D)/(-out_C)) && Cal_dis(in_x[k],in_y[k],0,position[0],position[1],0)<=detect_range){
-            out_x.push(in_x[k]);
-            out_y.push(in_y[k]);
-            out_z.push(in_z[k]);
-        }
-    }
-}
-
-void Remove_walls(queue <float> with_x, queue <float> with_y, queue <float> with_z, queue <float>& o_x,queue <float>& o_y, queue <float>& o_z, queue <float>& wall_x, queue <float>& wall_y, queue <float>& wall_lenth, queue <float>& wall_height, queue <float>& wall_angle){
-    double in_x[with_x.size()];
-    double in_y[with_y.size()];
-    double in_z[with_z.size()];
-    int queue_size = with_x.size();
-    o_x = {};
-    o_y = {};
-    o_z = {};
     wall_x = {};
     wall_y = {};
     wall_lenth = {};
     wall_height = {};
     wall_angle = {};
+    queue <float> temp_x = {};
+    queue <float> temp_y = {};
+    queue <float> temp_z = {};
 
-    //data reshape
-    for(int i=0;i<queue_size;i++){
-        in_x[i] = with_x.front();
-        in_y[i] = with_y.front();
-        in_z[i] = with_z.front();
-        with_x.pop();
-        with_y.pop();
-        with_z.pop();
+    // remove data that out of range
+    for(int i=0;i<all_points_size;i++){
+        if(Cal_dis(x.front(),y.front(),0,position[0],position[1],0)<=detect_range){
+            temp_x.push(x.front());
+            temp_y.push(y.front());
+            temp_z.push(z.front());
+            x.pop();
+            y.pop();
+            z.pop();
+        }else{
+            x.pop();
+            y.pop();
+            z.pop();
+        }
+    }
+    x = temp_x;
+    y = temp_y;
+    z = temp_z;
+
+    // detect plane
+    for(int qq=0;qq<max_wall_num;qq++){
+        int queue_size = x.size();
+        double in_x[x.size()];
+        double in_y[y.size()];
+        double in_z[z.size()];
+        //data reshape
+        for(int i=0;i<queue_size;i++){
+            in_x[i] = x.front();
+            in_y[i] = y.front();
+            in_z[i] = z.front();
+            x.pop();
+            y.pop();
+            z.pop();
+        }
+
+        // RANSAC
+        best_count = 0;
+        for(int w=0;w<Ransac_iter_times;w++){
+            // pick three points
+            clock_t time_now = clock();
+            int random_num1 = int(time_now/(double)CLOCKS_PER_SEC*1000000);
+            int p1 = random_num1%(queue_size+1);
+            int random_num2 = int(time_now/(double)CLOCKS_PER_SEC*100000);
+            int p2 = random_num1%(queue_size+1);
+            int random_num3 = int(time_now/(double)CLOCKS_PER_SEC*10000);
+            int p3 = random_num1%(queue_size+1);
+            if(p1==p2 || p2==p3 || p1 == p3){
+                p1 = rand()%(queue_size+1);
+                p2 = rand()%(queue_size+1);
+                p3 = rand()%(queue_size+1);
+            }
+
+            // three point to plane
+            double x1 = in_x[p1];
+            double y1 = in_y[p1];
+            double z1 = in_z[p1];
+            double x2 = in_x[p2];
+            double y2 = in_y[p2];
+            double z2 = in_z[p2];
+            double x3 = in_x[p3];
+            double y3 = in_y[p3];
+            double z3 = in_z[p3];
+
+            double A = (y2 - y1)*(z3 - z1) - (z2 - z1)*(y3 - y1);
+            double B = (x3 - x1)*(z2 - z1) - (x2 - x1)*(z3 - z1);
+            double C = (x2 - x1)*(y3 - y1) - (x3 - x1)*(y2 - y1);
+            double D = -(A * x1 + B * y1 + C * z1);
+
+            // count points in range
+            int count_in_range = 0;
+            for(int i=0;i<queue_size;i++){
+                double dis = fabs((A*in_x[i] + B*in_y[i] + C*in_z[i] + D ) / sqrt(A*A + B*B + C*C));
+                if(dis<Ransac_range){
+                    count_in_range = count_in_range + 1;
+                }
+            }
+
+            if(count_in_range>best_count){
+                best_plane_p1[0] = in_x[p1];
+                best_plane_p1[1] = in_y[p1];
+                best_plane_p1[2] = in_z[p1];
+                best_plane_p2[0] = in_x[p2];
+                best_plane_p2[1] = in_y[p2];
+                best_plane_p2[2] = in_z[p2];
+                best_plane_p3[0] = in_x[p3];
+                best_plane_p3[1] = in_y[p3];
+                best_plane_p3[2] = in_z[p3];
+                best_count = count_in_range;
+            }
+        }
+
+        // best plane parameters
+        double best_A = (best_plane_p2[1] - best_plane_p1[1])*(best_plane_p3[2] - best_plane_p1[2]) - (best_plane_p2[2] - best_plane_p1[2])*(best_plane_p3[1] - best_plane_p1[1]);
+        double best_B = (best_plane_p3[0] - best_plane_p1[0])*(best_plane_p2[2] - best_plane_p1[2]) - (best_plane_p2[0] - best_plane_p1[0])*(best_plane_p3[2] - best_plane_p1[2]);
+        double best_C = (best_plane_p2[0] - best_plane_p1[0])*(best_plane_p3[1] - best_plane_p1[1]) - (best_plane_p3[0] - best_plane_p1[0])*(best_plane_p2[1] - best_plane_p1[1]);
+        double best_D = -(best_A * best_plane_p1[0] + best_B * best_plane_p1[1] + best_C * best_plane_p1[2]);
+
+        best_A = best_A/best_C;
+        best_B = best_B/best_C;
+        best_D = best_D/best_C;
+        best_C = best_C/best_C;
+
+        // cout<<"angle with ground = "<<angle_with_plane_and_plane(best_A,best_B,best_C,0,0,1)<<endl;
+        // // cout<<point_to_plane_distance(out_A,out_B,out_C,out_D,position[0],position[1],0)<<endl;
+
+        // calculate the density of the plane
+        double wall_density = 0;
+        double w_angle = 0;
+        double wall_max_h = -999;
+        double wall_min_h = 999;
+        double wall_max_x = -999;
+        double wall_min_x = 999;
+        double wall_max_y = -999;
+        double wall_min_y = 999;
+
+        // calculate the angle of the wall
+        w_angle = angle_with_plane_and_plane(best_A,best_B,0,0,1,0);
+
+        // calculate the size of wall's area
+        queue <float> wall_tf_x = {};
+        queue <float> wall_tf_y = {};
+        queue <float> wall_tf_z = {};
+        for(int k=0;k<queue_size;k++){
+            if(point_to_plane_distance(best_A, best_B, best_C, best_D, in_x[k], in_y[k], in_z[k])<Wall_error){
+                // Project point to plane
+                double project_x = project_point_to_plane(best_A,best_B,best_C,best_D, in_x[k], in_y[k], in_z[k], 0);
+                double project_y = project_point_to_plane(best_A,best_B,best_C,best_D, in_x[k], in_y[k], in_z[k], 1);
+                double project_z = project_point_to_plane(best_A,best_B,best_C,best_D, in_x[k], in_y[k], in_z[k], 2);
+
+                if(project_z>wall_max_h){
+                    wall_max_h = project_z;
+                }
+                if(wall_min_h>project_z){
+                    wall_min_h = project_z;
+                }
+                if(project_x>wall_max_x){
+                    wall_max_x = project_x;
+                }
+                if(wall_min_x>project_x){
+                    wall_min_x = project_x;
+                }
+                if(project_y>wall_max_y){
+                    wall_max_y = project_y;
+                }
+                if(wall_min_y>project_y){
+                    wall_min_y = project_y;
+                }
+            }
+        }
+
+        // slice walls into pieces
+        vector<vector<int> >slice_list(wall_slice_pieces/2);
+        for(int i = 0; i <wall_slice_pieces/2; i++){
+            slice_list[i].resize(wall_slice_pieces);
+        }
+
+        // calculate points density
+        double wall_rt[3] = {wall_max_x,wall_min_y,wall_max_h};
+        double wall_rb[3] = {wall_max_x,wall_min_y,wall_min_h};
+        double wall_lt[3] = {wall_min_x,wall_max_y,wall_max_h};
+        double wall_lb[3] = {wall_min_x,wall_max_y,wall_min_h};
+
+        for(int k=0;k<queue_size;k++){
+            if(point_to_plane_distance(best_A, best_B, best_C, best_D, in_x[k], in_y[k], in_z[k])<Wall_error){
+                // Project point to new plane
+                double x1 = wall_rt[0];
+                double y1 = wall_rt[1];
+                double z1 = wall_rt[2];
+                double x2 = wall_lt[0];
+                double y2 = wall_lt[1];
+                double z2 = wall_lt[2];
+                double x3 = wall_lb[0];
+                double y3 = wall_lb[1];
+                double z3 = wall_lb[2];
+                double a = (y2 - y1)*(z3 - z1) - (z2 - z1)*(y3 - y1);
+                double b = (x3 - x1)*(z2 - z1) - (x2 - x1)*(z3 - z1);
+                double c = (x2 - x1)*(y3 - y1) - (x3 - x1)*(y2 - y1);
+                double d = -(a * x1 + b * y1 + c * z1);
+                double project_x = project_point_to_plane(a, b, c, d, in_x[k], in_y[k], in_z[k], 0);
+                double project_y = project_point_to_plane(a, b, c, d, in_x[k], in_y[k], in_z[k], 1);
+                double project_z = project_point_to_plane(a, b, c, d, in_x[k], in_y[k], in_z[k], 2);
+
+                // wall_tf_x.push(project_x);
+                // wall_tf_y.push(project_y);
+                // wall_tf_z.push(project_z);
+
+                // bottom to top
+                int b2t = -1;
+                bool hit_flag = false;
+                for(int i=0;i<wall_slice_pieces/2 && !hit_flag;i++){
+                    if(wall_min_h+(wall_max_h-wall_min_h)/wall_slice_pieces*2*i<=project_z && project_z<=wall_min_h+(wall_max_h-wall_min_h)/wall_slice_pieces*2*(i+1)){
+                        b2t = i;
+                        hit_flag = true;
+                    }
+                }
+
+                // left to right
+                double aaa = wall_lb[0]-wall_lt[0];
+                double bbb = wall_lb[1]-wall_lt[1];
+                double ccc = wall_lb[2]-wall_lt[2];
+                double ddd = -(aaa*wall_lt[0]+bbb*wall_lt[1]+ccc*wall_lt[2]);
+                double project_xxx = project_point_to_plane(aaa, bbb, ccc, ddd, project_x, project_y, project_z, 0);
+                double project_yyy = project_point_to_plane(aaa, bbb, ccc, ddd, project_x, project_y, project_z, 1);
+                double project_zzz = project_point_to_plane(aaa, bbb, ccc, ddd, project_x, project_y, project_z, 2);
+
+                int l2r = -1;
+                hit_flag = false;
+                for(int i=0;i<wall_slice_pieces && !hit_flag;i++){
+                    if(wall_lt[0]+(wall_rt[0]-wall_lt[0])/wall_slice_pieces*i<=project_xxx && project_xxx<=wall_lt[0]+(wall_rt[0]-wall_lt[0])/wall_slice_pieces*(i+1)){
+                        l2r = i;
+                        hit_flag = true;
+                    }
+                }
+
+                if(b2t != -1 && l2r != -1){
+                    slice_list[b2t][l2r] = slice_list[b2t][l2r] + 1;
+                }
+            }
+        }
+
+        // show slice array
+        // for(int l=0;l<wall_slice_pieces/2;l++){
+        //     for(int q=0;q<wall_slice_pieces;q++){
+        //         if(slice_list[l][q]>1){
+        //             cout <<" "<<"0";
+        //         }else{
+        //             cout <<" "<<"_";
+        //         }
+        //     }
+        //     cout <<endl;
+        // }
+
+        // calculate the proportion of wall points
+        int sum = 0;
+        for(int l=0;l<wall_slice_pieces/2;l++){
+            for(int q=0;q<wall_slice_pieces;q++){
+                if(slice_list[l][q]>1){
+                    sum = sum + 1;
+                }else{
+                }
+            }
+        }
+
+        wall_density = double(sum)/(wall_slice_pieces*wall_slice_pieces/2);
+        // cout <<"wall_density = "<<wall_density<<endl;
+
+        // test_x_p = wall_tf_x;
+        // test_y_p = wall_tf_y;
+        // test_z_p = wall_tf_z;
+
+        // cout<<angle_with_plane_and_plane(best_A,best_B,best_C,0,0,1)<<endl;
+        // cout<<wall_density <<endl;
+
+        if(angle_with_plane_and_plane(best_A,best_B,best_C,0,0,1)<Ground_plane_error && !find_ground_flag){
+            // found ground and remove ground points
+            // cout<<"ggggg"<<endl;
+            out_A = best_A;
+            out_B = best_B;
+            out_C = best_C;
+            out_D = best_D;
+            // remove ground
+            for(int k=0;k<queue_size;k++){
+                if(in_z[k]<=Ground_error+(best_A*in_x[k]+best_B*in_y[k]+best_D)/(-best_C)){
+                    in_x[k] = 99.9;
+                    in_y[k] = 99.9;
+                    in_z[k] = 99.9;
+                    find_ground_flag = true;
+                }
+            }
+        }else if(angle_with_plane_and_plane(best_A,best_B,best_C,0,0,1)>Wall_plane_error && wall_density >= wall_min_density){
+            // found wall and remove wall's points
+            // cout<<"wwwww"<<endl;
+
+            // remove points
+            for(int k=0;k<queue_size;k++){
+                if(point_to_plane_distance(best_A, best_B, best_C, best_D, in_x[k], in_y[k], in_z[k])<=Wall_error){
+                    in_x[k] = 99.9;
+                    in_y[k] = 99.9;
+                    in_z[k] = 99.9;
+                }
+            }
+            // push wall parameters
+            wall_x.push((wall_max_x+wall_min_x)/2);
+            wall_y.push((wall_max_y+wall_min_y)/2);
+            wall_lenth.push(sqrt(pow(wall_max_x-wall_min_x,2)+pow(wall_max_y-wall_min_y,2)));
+            wall_height.push(abs(wall_max_h-wall_min_h));
+            wall_angle.push(w_angle);
+        }else{
+            // cout<<"no ground no wall"<<endl;
+        }
+
+        // refill the points
+        temp_x = {};
+        temp_y = {};
+        temp_z = {};
+        for(int i=0;i<queue_size;i++){
+            if(in_x[i]!= 99.9 && in_y[i]!= 99.9 && in_z[i]!= 99.9){
+                temp_x.push(in_x[i]);
+                temp_y.push(in_y[i]);
+                temp_z.push(in_z[i]);
+            }
+        }
+        x = temp_x;
+        y = temp_y;
+        z = temp_z;
     }
 
-
-
-
-
-
-    // test data
-    for(int i=0; i<queue_size; i++){
-        o_x.push(in_x[i]);
-        o_y.push(in_y[i]);
-        o_z.push(in_z[i]);
-    }
-    for(int i=0; i<4; i++){
-        wall_x.push(i*2);
-        wall_y.push(i*2);
-        wall_lenth.push(1.5);
-        wall_height.push(1.0);
-        wall_angle.push(30*i);
-    }
+    // output the points
+    out_x = x;
+    out_y = y;
+    out_z = z;
 }
-
 
 void Points_Simplification(queue <float> x,queue <float> y, queue <float>& out_x,queue <float>& out_y){
     double in_x[x.size()];
@@ -1215,8 +1437,9 @@ void K_msans_plus_plus(queue <float> x,queue <float> y, queue <float>& out_x,que
     }
 }
 
-void Dynamic_tracking(queue <float> rre_x, queue <float> rre_y, queue <float> re_x,queue <float> re_y, queue <float> no_x,queue <float> no_y, queue <float>& o_dir, queue <float>& o_r, queue <float>& update_xx, queue <float>& update_yy, queue <float>& update_x, queue <float>& update_y){
-    int before_befor_size = rre_x.size();
+void Dynamic_tracking(queue <float> rrre_x, queue <float> rrre_y, queue <float> rre_x, queue <float> rre_y, queue <float> re_x,queue <float> re_y, queue <float> no_x,queue <float> no_y, queue <float>& o_dir, queue <float>& o_r, queue <float>& update_xxx, queue <float>& update_yyy, queue <float>& update_xx, queue <float>& update_yy, queue <float>& update_x, queue <float>& update_y){
+    int be_be_before_size = rre_x.size();
+    int be_before_size = rre_x.size();
     int before_size = re_x.size();
     int now_size = no_x.size();
 
@@ -1232,11 +1455,15 @@ void Dynamic_tracking(queue <float> rre_x, queue <float> rre_y, queue <float> re
             before_size++;
         }
     }
-
-    while(before_size>before_befor_size){
+    while(before_size>be_before_size){
         rre_x.push(99.9);
         rre_y.push(99.9);
-        before_befor_size++;
+        be_before_size++;
+    }
+    while(be_before_size>be_be_before_size){
+        rre_x.push(99.9);
+        rre_y.push(99.9);
+        be_be_before_size++;
     }
 
     // delete redundant data ????????
@@ -1249,9 +1476,10 @@ void Dynamic_tracking(queue <float> rre_x, queue <float> rre_y, queue <float> re
     //         cout<<"  %%  "<<endl;
     //     }
     // }
-
-    double before_before_x[before_size+1];
-    double before_before_y[before_size+1];
+    double be_be_before_x[before_size+1];
+    double be_be_before_y[before_size+1];
+    double be_before_x[before_size+1];
+    double be_before_y[before_size+1];
     double before_x[before_size+1];
     double before_y[before_size+1];
     double now_x[now_size+1];
@@ -1262,15 +1490,21 @@ void Dynamic_tracking(queue <float> rre_x, queue <float> rre_y, queue <float> re
     update_y = {};
     update_xx = {};
     update_yy = {};
+    update_xxx = {};
+    update_yyy = {};
 
     //data reshape
     for(int i=1;i<=before_size;i++){
-        before_before_x[i] = rre_x.front();
-        before_before_y[i] = rre_y.front();
+        be_be_before_x[i] = rrre_x.front();
+        be_be_before_y[i] = rrre_y.front();
+        be_before_x[i] = rre_x.front();
+        be_before_y[i] = rre_y.front();
         before_x[i] = re_x.front();
         before_y[i] = re_y.front();
         now_x[i] = no_x.front();
         now_y[i] = no_y.front();
+        rrre_x.pop();
+        rrre_y.pop();
         rre_x.pop();
         rre_y.pop();
         re_x.pop();
@@ -1385,23 +1619,33 @@ void Dynamic_tracking(queue <float> rre_x, queue <float> rre_y, queue <float> re
         update_yy.push(before_y[i]);
     }
 
+    // before before data update
+    for(int i=1;i<=before_size;i++){
+        update_xxx.push(be_before_x[i]);
+        update_yyy.push(be_before_y[i]);
+    }
+
     // // show all data
     // for(int i=1; i<=N; i++){
-    //     cout<<"bebefo = "<<before_before_x[i]<<"  "<< before_before_y[i]<<endl;
+    //     cout<<"bebefo = "<<be_before_x[i]<<"  "<< be_before_y[i]<<endl;
     //     cout<<"before = "<<before_x[i]<<"  "<< before_y[i]<<endl;
     //     cout<<"now    = "<<now_x[Current[i]]<<"  "<< now_y[Current[i]]<<endl;
     // }
 
     // calculate direction
     for(int i=1; i<=N; i++){
-        double xx1 = before_x[i] - before_before_x[i];
-        double yy1 = before_y[i] - before_before_y[i];
-        double xx2 = now_x[Current[i]] - before_before_x[i];
-        double yy2 = now_y[Current[i]] - before_before_y[i];
+        double xx1 = before_x[i] - be_before_x[i];
+        double yy1 = before_y[i] - be_before_y[i];
+        double xx2 = now_x[Current[i]] - be_before_x[i];
+        double yy2 = now_y[Current[i]] - be_before_y[i];
         double temp1 = atan2(yy1,xx1)*180/M_PI;
         double temp2 = atan2(yy2,xx2)*180/M_PI;
-        if(before_before_x[i]!=float(99.9) && before_before_y[i]!=float(99.9)){
-            o_dir.push((temp1+temp2)/2);
+        if(be_before_x[i]!=float(99.9) && be_before_y[i]!=float(99.9)){
+            if(temp1*temp2<0 && (temp1<-90 || temp2<-90)){
+                o_dir.push((temp1+temp2+360)/2);
+            }else{
+                o_dir.push((temp1+temp2)/2);
+            }
         }else{
             o_dir.push(temp1);
         }
@@ -1409,10 +1653,10 @@ void Dynamic_tracking(queue <float> rre_x, queue <float> rre_y, queue <float> re
 
     // calculate distance
     for(int i=1; i<=N; i++){
-        if(Cal_dis(now_x[Current[i]], now_y[Current[i]], 0, before_x[i], before_y[i], 0)*ros_hz > same_item_error || now_x[Current[i]]==float(99.9) || now_y[Current[i]]==float(99.9) || before_x[i]==float(99.9) || before_y[i]==float(99.9) || before_before_x[i]==float(99.9) || before_before_y[i]==float(99.9)){
+        if(Cal_dis(now_x[Current[i]], now_y[Current[i]], 0, before_x[i], before_y[i], 0)*ros_hz > same_item_error || now_x[Current[i]]==float(99.9) || now_y[Current[i]]==float(99.9) || before_x[i]==float(99.9) || before_y[i]==float(99.9) || be_before_x[i]==float(99.9) || be_before_y[i]==float(99.9)|| be_be_before_x[i]==float(99.9) || be_be_before_y[i]==float(99.9)){
             o_r.push((static_to_unstable_error+unstable_to_dynanic_error)/2);
         }else{
-            o_r.push((Cal_dis(now_x[Current[i]], now_y[Current[i]], 0, before_x[i], before_y[i], 0)+Cal_dis(now_x[Current[i]], now_y[Current[i]], 0, before_before_x[i], before_before_y[i], 0)+Cal_dis(before_x[i], before_y[i], 0, before_before_x[i], before_before_y[i], 0))/4*ros_hz);
+            o_r.push((Cal_dis(now_x[Current[i]], now_y[Current[i]], 0, before_x[i], before_y[i], 0)+Cal_dis(now_x[Current[i]], now_y[Current[i]], 0, be_before_x[i], be_before_y[i], 0)+Cal_dis(before_x[i], before_y[i], 0, be_before_x[i], be_before_y[i], 0)+Cal_dis(be_before_x[i], be_before_y[i], 0, be_be_before_x[i], be_be_before_y[i], 0)+Cal_dis(before_x[i], before_y[i], 0, be_be_before_x[i], be_be_before_y[i], 0)+Cal_dis(now_x[Current[i]], now_y[Current[i]], 0, be_be_before_x[i], be_be_before_y[i], 0))/10*ros_hz);
         }
     }
 }
@@ -1630,9 +1874,9 @@ int main(int argc, char** argv){
     ros::Rate loop_rate(ros_hz);
     while (ros::ok()){
         clock_t time_start = clock();
-        double plane_A,plane_B,plane_C,plane_D;
+        double ground_A,ground_B,ground_C,ground_D;
         queue <float> obj_x, obj_y, obj_z;
-        queue <float> with_walls_x, with_walls_y, with_walls_z;
+        // queue <float> with_walls_x, with_walls_y, with_walls_z;
         queue <float> walls_x, walls_y, walls_lenth, walls_height, walls_angle;
         queue <float> sim_x, sim_y;
         queue <float> k_means_x, k_means_y;
@@ -1640,13 +1884,12 @@ int main(int argc, char** argv){
         queue <float> next_dir, next_r;
         cout << "---\n";
         ////
-        Remove_ground(point_x, point_y, point_z, with_walls_x, with_walls_y, with_walls_z, plane_A, plane_B, plane_C, plane_D);
-        Pub_plane(plane_A, plane_B, plane_C, plane_D, plane_cylinder_pub);
-
-        Remove_walls(with_walls_x, with_walls_y, with_walls_z, obj_x, obj_y, obj_z, walls_x, walls_y, walls_lenth, walls_height, walls_angle);
+        Remove_ground_and_walls(point_x, point_y, point_z, obj_x, obj_y, obj_z, ground_A, ground_B, ground_C, ground_D, walls_x, walls_y, walls_lenth, walls_height, walls_angle);
+        Pub_ground(ground_A, ground_B, ground_C, ground_D, plane_cylinder_pub);
         Pub_walls(walls_x, walls_y, walls_lenth, walls_height, walls_angle, walls_cuble_pub);
-
         Pub_obj_points(obj_x, obj_y, obj_z, obj_points_pub);
+
+        // Pub_pcl_test(test_x_p,test_y_p,test_z_p,test_points_pub);
 
         Points_Simplification(obj_x, obj_y, sim_x, sim_y);
         Pub_simplified_points(sim_x, sim_y, sim_points_pub);
@@ -1654,7 +1897,7 @@ int main(int argc, char** argv){
         K_msans_plus_plus(sim_x, sim_y, k_means_x, k_means_y);
         Pub_k_center(k_means_x, k_means_y, K_center_pub);
 
-        Dynamic_tracking(place_record_2_x, place_record_2_y, place_record_1_x, place_record_1_y, k_means_x, k_means_y, next_dir, next_r, place_record_2_x, place_record_2_y, place_record_1_x, place_record_1_y);
+        Dynamic_tracking(place_record_3_x, place_record_3_y,place_record_2_x, place_record_2_y, place_record_1_x, place_record_1_y, k_means_x, k_means_y, next_dir, next_r, place_record_3_x, place_record_3_y,place_record_2_x, place_record_2_y, place_record_1_x, place_record_1_y);
 
         Bounding_box(obj_x, obj_y, obj_z, place_record_1_x, place_record_1_y, box_angle, box_length, box_width, box_height);
         Pub_static_box(place_record_1_x, place_record_1_y, box_angle, box_length, box_width, box_height, next_r, static_box_pub);

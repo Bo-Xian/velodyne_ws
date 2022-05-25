@@ -30,7 +30,7 @@ def Vel_pub(vel):
 pub_vel = rospy.Publisher('cmd_vel/man_2', Twist, queue_size=1)
 sub_odom = rospy.Subscriber("odom/man_2", Odometry, Set_Odom)
 run_rate = 5 # hz
-vel_ahead = 1.0
+vel_ahead = 1.5
 vel_turn = 1.0
 correction_para = 0.1
 pos = [0,0]
