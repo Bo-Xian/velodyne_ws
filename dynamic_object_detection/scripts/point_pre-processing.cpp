@@ -14,6 +14,7 @@
 #include <queue>
 #include <cmath>
 #include <ctime>
+#include <typeinfo>
 
 using namespace std;
 
@@ -32,20 +33,20 @@ double Ground_error = 0.2; // meters
 double Ground_plane_error = 10.0; // degree
 double Wall_plane_error = 80.0; // degree
 double Wall_error = 0.2; // meters
-double Wall_min_size = 1*3; // meters*meters
-double wall_min_density = 0.4; // percent/100
+double Wall_min_size = 2*3; // meters*meters
+double wall_min_density = 0.6; // percent/100
 double detect_range = 5.5; // meters
 int point_sim_pieces = 40;  // pieces*pieces
 int lattice_min_density = 2; // points per square
 int rotate_angle_gap = 10;  // degrees
-double box_error_endure = 0.1; // meters
+double box_error_endure = 0.2; // meters
 int max_object_number = 10;
 double static_to_unstable_error = 0.8; // meters/sec
 double unstable_to_dynanic_error = 1.2; // meters/sec
 double same_item_error = 10.0; // meters/sec
+double big_item_error = 1.4; // meters
 int max_wall_num = 4;
 int wall_slice_pieces = 20;  // pieces*pieces
-
 
 queue <float> place_record_1_x = {}; // last time
 queue <float> place_record_1_y = {}; // last time
@@ -363,6 +364,7 @@ void Pub_walls(queue <float> w_x,queue <float> w_y, queue <float> w_lenth, queue
 }
 
 void Pub_k_center(queue <float> x,queue <float> y, ros::Publisher pub_topic){
+
     visualization_msgs::Marker line_list;
     line_list.header.frame_id = "world";
     line_list.header.stamp = ros::Time::now();
@@ -739,6 +741,10 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
     queue <float> temp_x = {};
     queue <float> temp_y = {};
     queue <float> temp_z = {};
+    queue <float> register_x = {};
+    queue <float> register_y = {};
+    queue <float> register_z = {};
+
 
     // remove data that out of range
     for(int i=0;i<all_points_size;i++){
@@ -1009,7 +1015,7 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
                     find_ground_flag = true;
                 }
             }
-        }else if(angle_with_plane_and_plane(best_A,best_B,best_C,0,0,1)>Wall_plane_error && wall_density >= wall_min_density){
+        }else if(angle_with_plane_and_plane(best_A,best_B,best_C,0,0,1)>Wall_plane_error && wall_density >= wall_min_density && sqrt(pow(wall_max_x-wall_min_x,2)+pow(wall_max_y-wall_min_y,2))*abs(wall_max_h-wall_min_h)>Wall_min_size){
             // found wall and remove wall's points
             // cout<<"wwwww"<<endl;
 
@@ -1029,6 +1035,16 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
             wall_angle.push(w_angle);
         }else{
             // cout<<"no ground no wall"<<endl;
+            for(int k=0;k<queue_size;k++){
+                if(in_z[k]<=Wall_error+(best_A*in_x[k]+best_B*in_y[k]+best_D)/(-best_C)){
+                    register_x.push(in_x[k]);
+                    register_y.push(in_y[k]);
+                    register_z.push(in_z[k]);
+                    in_x[k] = 99.9;
+                    in_y[k] = 99.9;
+                    in_z[k] = 99.9;
+                }
+            }
         }
 
         // refill the points
@@ -1051,6 +1067,15 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
     out_x = x;
     out_y = y;
     out_z = z;
+    int refill_register = register_x.size();
+    for(int i=0;i<refill_register;i++){
+        out_x.push(register_x.front());
+        out_y.push(register_y.front());
+        out_z.push(register_z.front());
+        register_x.pop();
+        register_y.pop();
+        register_z.pop();
+    }
 }
 
 void Points_Simplification(queue <float> x,queue <float> y, queue <float>& out_x,queue <float>& out_y){
@@ -1303,7 +1328,7 @@ void K_msans_plus_plus(queue <float> x,queue <float> y, queue <float>& out_x,que
         //     cout << "MD " << i << " = " <<sse2MD[i] << endl;
         // }
 
-        // // calculate the angle of two line
+        // calculate the angle of two line
         for(int i=0; i<MAX_K; i++) {
             if(i==0){
                 sse_slope[i] = 0;
@@ -1318,6 +1343,11 @@ void K_msans_plus_plus(queue <float> x,queue <float> y, queue <float>& out_x,que
                 sse_slope[i] = 180-acos((x_alpha*x_beta + y_alpha*y_beta)/sqrt((x_alpha*x_alpha + y_alpha*y_alpha)*(x_beta*x_beta+y_beta*y_beta)))*180 / M_PI;
             }
         }
+
+        // for(int i=0; i<MAX_K; i++) {
+        //     cout << "slope " << i << " = " <<sse_slope[i] << endl;
+        // }
+
         // find max slpoe angle
         double max_slope_angle = -1;
         for(int i=0; i<MAX_K; i++) {
@@ -1428,12 +1458,100 @@ void K_msans_plus_plus(queue <float> x,queue <float> y, queue <float>& out_x,que
         for(int k=0; k<K; k++) {
             out_x.push(cent[k][0]);
             out_y.push(cent[k][1]);
-            // cout<< cent[k][0] << "  " << cent[k][1] << endl;
         }
-        // printf("sse   = %.2lf\n", sse2);
-        // printf("ch_pt = %d\n", ch_pt);
-        // printf("iter = %d\n", iter);
-        // cout << "sse" << K << " = " << sse2 << endl;
+    }
+
+    // special case when k=2 need to determine k=(1or2)
+    if(out_x.size()==2){
+        if(out_x.front()>=0 || out_x.front()<=0 || out_y.front()>=0 || out_y.front()<=0){
+            // when k=1 => cent[][] = -nan
+        }else{
+            queue <float> temp_2_x = {};
+            queue <float> temp_2_y = {};
+            double temp_list[DCNT][2];
+            double flag_x = 0;
+            double flag_y = 0;
+            double min_dis = 9999;
+            double dis_sum = 0;
+
+            // calculate k=1 center
+            for(int i=0; i<DCNT; i++){
+                temp_list[i][0] = x.front();
+                temp_list[i][1] = y.front();
+                x.pop();
+                y.pop();
+            }
+
+            for(int j=0;j<DCNT;j++){
+                dis_sum = 0;
+                for(int i=0; i<DCNT; i++){
+                    dis_sum += Cal_dis(temp_list[j][0],temp_list[j][1],0,temp_list[i][0],temp_list[i][1],0);
+                }
+                if(dis_sum<min_dis){
+                    flag_x = temp_list[j][0];
+                    flag_y = temp_list[j][1];
+                }
+            }
+
+            temp_2_x.push(flag_x);
+            temp_2_y.push(flag_y);
+            out_x = temp_2_x;
+            out_y = temp_2_y;
+        }
+    }
+
+    // int wwwww = out_x.size();
+    // for(int i=0;i<wwwww;i++){
+    //     cout<<"x = "<<out_x.front()<<" y = "<<out_y.front()<<endl;
+    //     out_x.pop();
+    //     out_y.pop();
+    // }
+
+    // remove the points that too close
+    if(out_x.size()>=2){
+        queue <float> temp_3_x = {};
+        queue <float> temp_3_y = {};
+        double temp_xx[DCNT];
+        double temp_yy[DCNT];
+        int temp_size = out_x.size();
+        for(int i=0; i<temp_size; i++){
+            temp_xx[i] = out_x.front();
+            temp_yy[i] = out_y.front();
+            out_x.pop();
+            out_y.pop();
+        }
+
+        // for(int i=0; i<temp_size; i++){
+        //     cout<<temp_xx[i]<<" "<<temp_yy[i]<<endl;
+        // }
+
+        for(int i=0;i<temp_size; i++){
+            for(int j=1;j<=temp_size;j++){
+                if(i!=j && Cal_dis(temp_xx[i],temp_yy[i],0,temp_xx[j],temp_yy[j],0)<=big_item_error && temp_xx[i]!=99 && temp_xx[j]!=99){
+                    temp_xx[i] = 1.0*(temp_xx[i]+temp_xx[j])/2.0;
+                    temp_yy[i] = 1.0*(temp_yy[i]+temp_yy[j])/2.0;
+                    temp_xx[j] = 99;
+                    temp_yy[j] = 99;
+                    // cout<<"i = "<<i<<" j = "<<j<<" "<<temp_xx[i]<<" "<<temp_yy[i]<<" "<<temp_xx[j]<<" "<<temp_yy[j]<<endl;
+                }
+            }
+        }
+
+        // cout<<"~~~"<<endl;
+        // for(int i=0; i<temp_size; i++){
+        //     cout<<temp_xx[i]<<" "<<temp_yy[i]<<endl;
+        // }
+
+        // refill output
+        for(int i=0;i<temp_size; i++){
+            if(temp_xx[i]!=99 && temp_yy[i]!=99){
+                temp_3_x.push(temp_xx[i]);
+                temp_3_y.push(temp_yy[i]);
+            }
+            // cout<<temp_xx[i]<<" "<<temp_yy[i]<<endl;
+        }
+        out_x = temp_3_x;
+        out_y = temp_3_y;
     }
 }
 
@@ -1661,17 +1779,20 @@ void Dynamic_tracking(queue <float> rrre_x, queue <float> rrre_y, queue <float> 
     }
 }
 
-void Bounding_box(queue <float> i_x,queue <float> i_y, queue <float> i_z, queue <float> k_x, queue <float> k_y, queue <float>& o_angle, queue <float>& o_length, queue <float>& o_width, queue <float>& o_height){
+void Bounding_box(queue <float> i_x,queue <float> i_y, queue <float> i_z, queue <float> k_x, queue <float> k_y,queue <float> o_x, queue <float> o_y, queue <float>& o_angle, queue <float>& o_length, queue <float>& o_width, queue <float>& o_height){
 
     int points_size = i_x.size();
     int k_size = k_x.size();
     double in_x[i_x.size()];
     double in_y[i_x.size()];
     double in_z[i_x.size()];
-    double points_belongs[i_x.size()];
+    int points_belongs[i_x.size()] = {};
     double in_k_x[k_x.size()];
     double in_k_y[k_x.size()];
-
+    double k_dis_sum[k_x.size()] = {};
+    double k_num_sum[k_x.size()] = {};
+    o_x = {};
+    o_y = {};
     o_angle = {};
     o_length = {};
     o_width = {};
@@ -1694,6 +1815,11 @@ void Bounding_box(queue <float> i_x,queue <float> i_y, queue <float> i_z, queue 
             k_y.pop();
         }
 
+        // show all k center
+        // for(int i=0; i<k_size; i++){
+        //     cout << in_k_x[i]<<" "<<in_k_y[i]<<endl;
+        // }
+
         // classify points to each k canter
         for(int i=0; i<points_size; i++){
             double min_dis = 99;
@@ -1705,12 +1831,44 @@ void Bounding_box(queue <float> i_x,queue <float> i_y, queue <float> i_z, queue 
                 }
             }
             points_belongs[i] = min_flag;
+            k_dis_sum[min_flag] += Cal_dis(in_x[i], in_y[i], 0, in_k_x[min_flag], in_k_y[min_flag], 0);
+            k_num_sum[min_flag] += 1;
         }
 
-        // // show points belongs
-        // for(int i=0; i<points_size; i++){
-        //     cout << points_belongs[i];
-        // }cout << endl;
+        // show points belongs
+        // for(int j=0; j<k_size; j++){
+        //     cout<<"k_x = "<<in_k_x[j]<<" k_y = "<<in_k_y[j]<<endl;
+        //     for(int i=0; i<points_size; i++){
+        //         if(points_belongs[i]==j){
+        //             cout << in_x[i] <<" "<<in_y[i]<<" "<<points_belongs[i]<<endl;
+        //         }
+        //     }
+        // }
+
+        //show all k distance, k sum
+        // for(int i=0;i<k_size;i++){
+        //     cout<<k_dis_sum[i]<< " " << k_num_sum[i]<<endl;
+        //     cout<<k_dis_sum[i]/k_num_sum[i]<<endl;
+        // }
+
+        // remove outliers
+        for(int i=0; i<points_size; i++){
+            for(int j=0; j<k_size; j++){
+                if(Cal_dis(in_x[i], in_y[i], 0, in_k_x[points_belongs[i]], in_k_y[points_belongs[i]], 0) > 1.8*k_dis_sum[points_belongs[i]]/k_num_sum[points_belongs[i]]){
+                    points_belongs[i] = 9;
+                }
+            }
+        }
+
+        // show points belongs after remove
+        // for(int j=0; j<k_size; j++){
+        //     cout<<"k_x = "<<in_k_x[j]<<" k_y = "<<in_k_y[j]<<endl;
+        //     for(int i=0; i<points_size; i++){
+        //         if(points_belongs[i]==j){
+        //             cout << in_x[i] <<" "<<in_y[i]<<" "<<points_belongs[i]<<endl;
+        //         }
+        //     }
+        // }
 
         // rotating cliper
         for(int i=0; i<k_size; i++){
@@ -1746,6 +1904,7 @@ void Bounding_box(queue <float> i_x,queue <float> i_y, queue <float> i_z, queue 
             }
             // cout << "best max = "<<best_max<<"  "<<"best min = "<< best_min<<"max-min = "<<best_max-best_min<<endl;
             // cout<< "best angle = "<<min_angle<<endl;
+            o_x.push((best_max+best_min)/2);
             o_angle.push(min_angle);
             o_width.push(best_max-best_min+box_error_endure);
 
@@ -1754,7 +1913,7 @@ void Bounding_box(queue <float> i_x,queue <float> i_y, queue <float> i_z, queue 
             double y_min = 99;
             for(int j=0;j<points_size;j++){
                 if(points_belongs[j]==i){
-                    if(Box_rotate_y(in_k_x[i],in_k_y[i],-min_angle+90,in_x[j],in_y[j])>y_max){
+                    if(y_max<Box_rotate_y(in_k_x[i],in_k_y[i],-min_angle+90,in_x[j],in_y[j])){
                         y_max = Box_rotate_y(in_k_x[i],in_k_y[i],-min_angle+90,in_x[j],in_y[j]);
                     }
                     if(y_min>Box_rotate_y(in_k_x[i],in_k_y[i],-min_angle+90,in_x[j],in_y[j])){
@@ -1762,96 +1921,9 @@ void Bounding_box(queue <float> i_x,queue <float> i_y, queue <float> i_z, queue 
                     }
                 }
             }
+            o_y.push((y_max+y_min)/2);
             o_length.push(y_max-y_min+box_error_endure);
             o_height.push(find_top+lidar_height+box_error_endure);
-        }
-    }
-
-}
-
-void KdTree_FLANN(queue <float> x,queue <float> y, queue <float> z, queue <float> k_means_x, queue <float> k_means_y){
-
-    int queue_size = x.size();
-    //创建一个PointCloud<pcl::PointXYZ>
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
-    cloud->width = queue_size;             //此处点云数量
-    cloud->height = 1;                //表示点云为无序点云
-    cloud->points.resize (cloud->width * cloud->height);
-
-    queue <float> out_x = {};
-    queue <float> out_y = {};
-    queue <float> out_z = {};
-
-    if(queue_size!=0){
-        // cout << queue_size << endl;
-        for(int i=0;i<queue_size;i++){
-            cloud->points[i].x = x.front();
-            cloud->points[i].y = y.front();
-            cloud->points[i].z = z.front();
-            x.pop();
-            y.pop();
-            z.pop();
-        }
-
-        //创建KdTreeFLANN对象，并把创建的点云设置为输入,创建一个searchPoint变量作为查询点
-        pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
-        //设置搜索空间
-        kdtree.setInputCloud (cloud);
-        //设置查询点并赋随机值
-        pcl::PointXYZ searchPoint;
-        searchPoint.x = test_x;
-        searchPoint.y = test_y;
-        searchPoint.z = test_z;
-
-        // K 临近搜索
-        //创建一个整数（设置为10）和两个向量来存储搜索到的K近邻，两个向量中，一个存储搜索到查询点近邻的索引，另一个存储对应近邻的距离平方
-        // int K = 10;
-
-        // vector<int> pointIdxNKNSearch(K);      //存储查询点近邻索引
-        // vector<float> pointNKNSquaredDistance(K); //存储近邻点对应距离平方
-        // //打印相关信息
-        // cout << "K nearest neighbor search at (" << searchPoint.x
-        //         << " " << searchPoint.y
-        //         << " " << searchPoint.z
-        //         << ") with K=" << K << endl;
-
-        // if ( kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 )  //执行K近邻搜索
-        // {
-        //     //打印所有近邻坐标
-        // for (size_t i = 0; i < pointIdxNKNSearch.size (); ++i)
-        //     cout << "    "  <<   cloud->points[ pointIdxNKNSearch[i] ].x
-        //             << " " << cloud->points[ pointIdxNKNSearch[i] ].y
-        //             << " " << cloud->points[ pointIdxNKNSearch[i] ].z
-        //             << " (squared distance: " << pointNKNSquaredDistance[i] << ")" << endl;
-        // }
-        /**********************************************************************************
-         下面的代码展示查找到给定的searchPoint的某一半径（随机产生）内所有近邻，重新定义两个向量
-        pointIdxRadiusSearch  pointRadiusSquaredDistance来存储关于近邻的信息
-        ********************************************************************************/
-        // 半径 R内近邻搜索方法
-
-        vector<int> pointIdxRadiusSearch;           //存储近邻索引
-        vector<float> pointRadiusSquaredDistance;   //存储近邻对应距离的平方
-
-        float radius = 1;   //随机的生成某一半徑
-        //打印输出
-        cout << "Neighbors within radius search at (" << searchPoint.x
-                << " " << searchPoint.y
-                << " " << searchPoint.z
-                << ") with radius=" << radius << endl;
-
-
-        if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0 )  //执行半径R内近邻搜索方法
-        {
-            for (size_t i = 0; i < pointIdxRadiusSearch.size (); ++i){
-                cout << "    "  <<   cloud->points[ pointIdxRadiusSearch[i] ].x
-                        << " " << cloud->points[ pointIdxRadiusSearch[i] ].y
-                        << " " << cloud->points[ pointIdxRadiusSearch[i] ].z
-                        << " (squared distance: " << pointRadiusSquaredDistance[i] << ")" << endl;
-                out_x.push(cloud->points[ pointIdxRadiusSearch[i] ].x);
-                out_y.push(cloud->points[ pointIdxRadiusSearch[i] ].y);
-                out_z.push(cloud->points[ pointIdxRadiusSearch[i] ].z);
-            }
         }
     }
 
@@ -1895,18 +1967,13 @@ int main(int argc, char** argv){
         Pub_simplified_points(sim_x, sim_y, sim_points_pub);
 
         K_msans_plus_plus(sim_x, sim_y, k_means_x, k_means_y);
-        Pub_k_center(k_means_x, k_means_y, K_center_pub);
 
         Dynamic_tracking(place_record_3_x, place_record_3_y,place_record_2_x, place_record_2_y, place_record_1_x, place_record_1_y, k_means_x, k_means_y, next_dir, next_r, place_record_3_x, place_record_3_y,place_record_2_x, place_record_2_y, place_record_1_x, place_record_1_y);
 
-        Bounding_box(obj_x, obj_y, obj_z, place_record_1_x, place_record_1_y, box_angle, box_length, box_width, box_height);
+        Bounding_box(obj_x,obj_y,obj_z, place_record_1_x,place_record_1_y, place_record_1_x, place_record_1_y, box_angle,box_length,box_width,box_height);
+        Pub_k_center(place_record_1_x, place_record_1_y, K_center_pub);
         Pub_static_box(place_record_1_x, place_record_1_y, box_angle, box_length, box_width, box_height, next_r, static_box_pub);
         Pub_dynamic_box(place_record_1_x, place_record_1_y, box_angle, box_length, box_width, box_height, next_dir, next_r, dynamic_box_pub);
-
-        // queue <float> a_obj_x,a_obj_y,a_obj_z;
-        // KdTree_FLANN(obj_x, obj_y, obj_z, k_means_x, k_means_y);
-        // Pub_a_pcl_test(test_x, test_y, test_z, a_points_pub);
-        // Pub_pcl_test(box_x, box_y, box_x, test_points_pub);
 
         cout << "raw = " <<point_x.size() << " obj = " <<obj_x.size() << " sim = " << sim_x.size() << " K = " << k_means_x.size() << endl;
         ////

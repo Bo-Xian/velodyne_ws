@@ -15,6 +15,11 @@
     <origin xyz="0 0 0.05" rpy="0 0 0" />
   </joint>
 
+  <gazebo reference="base_link">
+    <material>Gazebo/Red</material>
+    <turnGravityOff>false</turnGravityOff>
+  </gazebo>
+
   <link name="base_link" >
     <visual>
       <geometry>
@@ -28,7 +33,7 @@
     </collision>
     <inertial>
       <origin xyz="0 0 0"/>
-      <mass value="100"/>
+      <mass value="10"/>
       <inertia ixx="3.0" ixy="0.0" ixz="0.0"
                iyy="3.0" iyz="0.0"
                izz="3.0" />

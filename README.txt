@@ -7,10 +7,12 @@ open 3D Lidar       : $ roslaunch velodyne_pointcloud VLP16_points.launch
 使用data set
 pub kitti data set  : $ rosrun pub_test_data pub_tset_data.py
 
-open rviz           : $ rosrun rviz rviz -f velodyne
+open rviz           : $ rosrun rviz rviz -d src/velodyne_simulator/velodyne_description/rviz/final.rviz
 
 使用Gazebo
-open gazebo         :$ roslaunch velodyne_description example.launch
+open simple gzworld :$ roslaunch velodyne_description example.launch
+open factory gzworld:$ roslaunch aws_robomaker_small_warehouse_world small_warehouse_new.launch sim:=true
+
 kill gazebo         :$ killall gzserver
                     :$ killall gzclient
 
@@ -43,7 +45,7 @@ web                         :控制vlp-16移動
 參考資料
 
 SLAM之鐳射雷達Velodyne vlp-16使用
-https://www.itread01.com/content/1547352842.html
+https://www.itread01.com/content/1547352842.htmla
 
 velodyne Tutorials
 http://wiki.ros.org/velodyne/Tutorials/Getting%20Started%20with%20the%20Velodyne%20VLP16
@@ -51,8 +53,8 @@ http://wiki.ros.org/velodyne/Tutorials/Getting%20Started%20with%20the%20Velodyne
 AI葵 yuotube
 https://www.youtube.com/channel/UC7UlsMUu_gIgpqNGB4SqSwQ
 
-Python 调用 C++
-https://iqhy.github.io/posts/2020/0228155601/
+工廠 Gazebo github
+https://github.com/aws-robotics/aws-robomaker-small-warehouse-world
 
 ################################################################
 
