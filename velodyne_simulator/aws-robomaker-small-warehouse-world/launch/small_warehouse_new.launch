@@ -14,16 +14,7 @@
     <arg name="verbose" default="true"/>
   </include>
 
-  <!-- Spawn the robot with 3D Lidar -->
-  <arg name="gpu" default="false"/>
-  <arg name="organize_cloud" default="false"/>
-  <param name="robot_description" command="$(find xacro)/xacro --inorder '$(find velodyne_description)/urdf/example.urdf.xacro' organize_cloud:=$(arg organize_cloud) gpu:=$(arg gpu)" />
-  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
-    <param name="publish_frequency" type="double" value="30.0" />
-  </node>
-  <node name="spawn_model" pkg="gazebo_ros" type="spawn_model" args="-urdf -param /robot_description -model example"/>
-
-  <!-- rosrun world to VLP-16 TF -->
+  <!-- rosrun world to VLP-16-odom TF -->
   <node name="points_converter" pkg="dynamic_object_detection" type="points_converter"/>
 
   <!-- RViz -->
@@ -36,6 +27,15 @@
   </include>
 
   <group if="$(arg sim)">
+
+    <!-- Spawn the robot with 3D Lidar -->
+    <arg name="gpu" default="false"/>
+    <arg name="organize_cloud" default="false"/>
+    <param name="robot_description" command="$(find xacro)/xacro --inorder '$(find velodyne_description)/urdf/example.urdf.xacro' organize_cloud:=$(arg organize_cloud) gpu:=$(arg gpu)" />
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
+      <param name="publish_frequency" type="double" value="30.0" />
+    </node>
+    <node name="spawn_model" pkg="gazebo_ros" type="spawn_model" args="-urdf -param /robot_description -model example"/>
 
     <!-- Spawn a walking robot 1 -->
     <param name="man_1_description" command="$(find xacro)/xacro --inorder '$(find velodyne_description)/urdf/moving_obs_1.xacro'" />
@@ -81,8 +81,10 @@
 
   <group unless="$(arg sim)">
 
+    <!-- rosrun world to VLP-16 TF -->
+    <node name="points_converter_w2v" pkg="dynamic_object_detection" type="points_converter_w2v"/>
+
     <include file="$(find velodyne_pointcloud)/launch/VLP16_points.launch" >
-      <arg name="port" value="9090"/>
     </include>
 
   </group>

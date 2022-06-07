@@ -142,10 +142,15 @@ include_directories(
 
 add_executable(points_converter scripts/geodetic_coordinates.cpp)
 target_link_libraries(points_converter ${catkin_LIBRARIES})
+
+add_executable(points_converter_w2v scripts/geodetic_coordinates_w2v.cpp)
+target_link_libraries(points_converter_w2v ${catkin_LIBRARIES})
+
 add_executable(test_cpp scripts/test.cpp)
 target_link_libraries(test_cpp ${catkin_LIBRARIES})
-add_executable(point_pre_processor scripts/point_pre-processing.cpp)
-target_link_libraries(point_pre_processor ${catkin_LIBRARIES})
+
+add_executable(point_processor scripts/point_processing.cpp)
+target_link_libraries(point_processor ${catkin_LIBRARIES})
 
 
 

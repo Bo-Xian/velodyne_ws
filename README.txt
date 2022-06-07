@@ -18,16 +18,19 @@ kill gazebo         :$ killall gzserver
 
 運行動態偵測
 objects detection   : $ rosrun dynamic_object_detection pointCloud.py
-objects detection   : $ rosrun dynamic_object_detection point_pre_processor
+objects detection   : $ rosrun dynamic_object_detection point_processor
 
 ################################################################
 
 連接實體VLP-16 網路線設定
 
-手動
+IPv4 手動
 地址	：192.168.1.77
 網路遮罩：255.255.255.0
 通訊閘	：192.168.1.1
+DNS    :0.0.0.0
+
+gsettings Lidar : http://192.168.1.201/
 
 ################################################################
 
@@ -60,13 +63,17 @@ https://github.com/aws-robotics/aws-robomaker-small-warehouse-world
 
 下載 import
 
-pip install pandas
+run my python file
+    pip install pandas
 
-pip install scikit-learn
+    pip install scikit-learn
 
-pip install fuzzy-c-means
+    pip install fuzzy-c-means
 
-pip install cython
+    pip install cython
+
+run my cpp file
+    sudo apt-get install libpcap0.8-dev
 
 python讀中文字
 # -*- coding: UTF-8 -*-

@@ -26,6 +26,31 @@ typedef pcl::PointCloud<pcl::PointXYZRGB> PointCloudRGB;
 queue <float> point_x, point_y, point_z;
 double position[3];
 
+// parameter for real world
+// double lidar_height = 0.35; // meters
+// int Ransac_iter_times = 1000; // times
+// double Ransac_range = 0.15; // meters
+// double Ground_error = 0.15; // meters
+// double Ground_plane_error = 20.0; // degree
+// double Wall_plane_error = 70.0; // degree
+// double Wall_error = 0.15; // meters
+// double Wall_min_size = 2*1; // meters*meters
+// double wall_min_density = 0.6; // percent/100
+// double detect_range = 2.7; // meters
+// int point_sim_pieces = 40;  // pieces*pieces
+// int lattice_min_density = 2; // points per square
+// int rotate_angle_gap = 10;  // degrees
+// double box_error_endure = 0.05; // meters
+// int max_object_number = 10;
+// double static_to_unstable_error = 0.3; // meters/sec
+// double unstable_to_dynanic_error = 0.6; // meters/sec
+// double same_item_error = 10.0; // meters/sec
+// double big_item_error = 0.3; // meters
+// int max_wall_num = 4;
+// int wall_slice_pieces = 20;  // pieces*pieces
+// double k_center_line_wifth = 1.5; // meter
+
+// parameter for gazebo simulator
 double lidar_height = 1.1; // meters
 int Ransac_iter_times = 1000; // times
 double Ransac_range = 0.15; // meters
@@ -47,6 +72,8 @@ double same_item_error = 10.0; // meters/sec
 double big_item_error = 1.4; // meters
 int max_wall_num = 4;
 int wall_slice_pieces = 20;  // pieces*pieces
+double k_center_line_wifth = 2.5; // meter
+
 
 queue <float> place_record_1_x = {}; // last time
 queue <float> place_record_1_y = {}; // last time
@@ -54,10 +81,6 @@ queue <float> place_record_2_x = {}; // last last time
 queue <float> place_record_2_y = {}; // last last time
 queue <float> place_record_3_x = {}; // last last last time
 queue <float> place_record_3_y = {}; // last last last time
-
-float test_x = -1.05551;
-float test_y = 4.1879242;
-float test_z = -0.0879242;
 
 queue <float> test_x_p, test_y_p, test_z_p;
 
@@ -201,8 +224,8 @@ void Pub_pcl_test(queue <float> x,queue <float> y, queue <float> z,ros::Publishe
         pcl::PointXYZRGB p;
         p.x = x.front();
         p.y = y.front();
-        p.z = z.front();
-        // p.z = z.front()+lidar_height;
+        // p.z = z.front();
+        p.z = z.front()+lidar_height;
         p.r = 255;
         p.g = 0;
         p.b = 0;
@@ -337,7 +360,7 @@ void Pub_walls(queue <float> w_x,queue <float> w_y, queue <float> w_lenth, queue
             marker.pose.orientation.z = in_a[i]/90;
             marker.pose.orientation.w = 1.0;
             marker.scale.x = in_l[i];
-            marker.scale.y = 0.2;
+            marker.scale.y = Wall_error;
             marker.scale.z = in_h[i];
             marker.color.a = 0.8;
             marker.color.r = 0.8;
@@ -389,7 +412,7 @@ void Pub_k_center(queue <float> x,queue <float> y, ros::Publisher pub_topic){
         y.pop();
 
         line_list.points.push_back(p);
-        p.z += 2.5;
+        p.z += k_center_line_wifth;
         line_list.points.push_back(p);
 
     }
@@ -745,6 +768,9 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
     queue <float> register_y = {};
     queue <float> register_z = {};
 
+    // test_x_p = {};
+    // test_y_p = {};
+    // test_z_p = {};
 
     // remove data that out of range
     for(int i=0;i<all_points_size;i++){
@@ -768,6 +794,7 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
     // detect plane
     for(int qq=0;qq<max_wall_num;qq++){
         int queue_size = x.size();
+        // cout<<"size = "<<x.size()<<endl;
         double in_x[x.size()];
         double in_y[y.size()];
         double in_z[z.size()];
@@ -992,12 +1019,9 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
         wall_density = double(sum)/(wall_slice_pieces*wall_slice_pieces/2);
         // cout <<"wall_density = "<<wall_density<<endl;
 
-        // test_x_p = wall_tf_x;
-        // test_y_p = wall_tf_y;
-        // test_z_p = wall_tf_z;
-
         // cout<<angle_with_plane_and_plane(best_A,best_B,best_C,0,0,1)<<endl;
         // cout<<wall_density <<endl;
+        // cout<<sqrt(pow(wall_max_x-wall_min_x,2)+pow(wall_max_y-wall_min_y,2))*abs(wall_max_h-wall_min_h)<<endl;
 
         if(angle_with_plane_and_plane(best_A,best_B,best_C,0,0,1)<Ground_plane_error && !find_ground_flag){
             // found ground and remove ground points
@@ -1032,7 +1056,8 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
             wall_y.push((wall_max_y+wall_min_y)/2);
             wall_lenth.push(sqrt(pow(wall_max_x-wall_min_x,2)+pow(wall_max_y-wall_min_y,2)));
             wall_height.push(abs(wall_max_h-wall_min_h));
-            wall_angle.push(w_angle);
+            wall_angle.push(90+atan2((wall_max_y+wall_min_y)/2,(wall_max_x+wall_min_x)/2)*180/M_PI);
+            // wall_angle.push(w_angle);
         }else{
             // cout<<"no ground no wall"<<endl;
             for(int k=0;k<queue_size;k++){
@@ -1061,6 +1086,12 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
         x = temp_x;
         y = temp_y;
         z = temp_z;
+
+        // if(qq==1){
+        //     test_x_p = temp_x;
+        //     test_y_p = temp_y;
+        //     test_z_p = temp_z;
+        // }
     }
 
     // output the points
@@ -1961,7 +1992,7 @@ int main(int argc, char** argv){
         Pub_walls(walls_x, walls_y, walls_lenth, walls_height, walls_angle, walls_cuble_pub);
         Pub_obj_points(obj_x, obj_y, obj_z, obj_points_pub);
 
-        // Pub_pcl_test(test_x_p,test_y_p,test_z_p,test_points_pub);
+        Pub_pcl_test(test_x_p,test_y_p,test_z_p,test_points_pub);
 
         Points_Simplification(obj_x, obj_y, sim_x, sim_y);
         Pub_simplified_points(sim_x, sim_y, sim_points_pub);
