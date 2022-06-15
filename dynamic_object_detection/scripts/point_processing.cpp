@@ -18,7 +18,7 @@
 
 using namespace std;
 
-int ros_hz = 3;
+int ros_hz = 4;
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 typedef pcl::PointCloud<pcl::PointXYZRGB> PointCloudRGB;
@@ -49,6 +49,8 @@ double position[3];
 // int max_wall_num = 4;
 // int wall_slice_pieces = 20;  // pieces*pieces
 // double k_center_line_wifth = 1.5; // meter
+// double dynamic_max_speed = 5.0; // meters/sec
+
 
 // parameter for gazebo simulator
 double lidar_height = 1.1; // meters
@@ -73,7 +75,7 @@ double big_item_error = 1.4; // meters
 int max_wall_num = 4;
 int wall_slice_pieces = 20;  // pieces*pieces
 double k_center_line_wifth = 2.5; // meter
-
+double dynamic_max_speed = 5.0; // meters/sec
 
 queue <float> place_record_1_x = {}; // last time
 queue <float> place_record_1_y = {}; // last time
@@ -684,40 +686,40 @@ void Pub_dynamic_box(queue <float> x, queue <float> y ,queue <float> angle, queu
             double arrow_body = 1.3;
             double arrow_length = 0.5;
             double arrow_width = 0.3;
-            if(next_v.front()>unstable_to_dynanic_error){
+            if(dynamic_max_speed>next_v.front() && next_v.front()>unstable_to_dynanic_error){
                 p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()*0+0.0,y.front()+0.0);
                 p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()*0+0.0,y.front()+0.0);
                 p.z = height.front()/2;
                 line_list.points.push_back(p);
-                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body,y.front()+0.0);
-                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body,y.front()+0.0);
+                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front(),y.front()+0.0);
+                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front(),y.front()+0.0);
                 p.z = height.front()/2;
                 line_list.points.push_back(p);
 
-                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body,y.front()+0.0);
-                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body,y.front()+0.0);
+                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front(),y.front()+0.0);
+                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front(),y.front()+0.0);
                 p.z = height.front()/2;
                 line_list.points.push_back(p);
-                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body-arrow_length,y.front()+arrow_width);
-                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body-arrow_length,y.front()+arrow_width);
-                p.z = height.front()/2;
-                line_list.points.push_back(p);
-
-                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body-arrow_length,y.front()+arrow_width);
-                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body-arrow_length,y.front()+arrow_width);
-                p.z = height.front()/2;
-                line_list.points.push_back(p);
-                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body-arrow_length,y.front()-arrow_width);
-                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body-arrow_length,y.front()-arrow_width);
+                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front()-arrow_length,y.front()+arrow_width);
+                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front()-arrow_length,y.front()+arrow_width);
                 p.z = height.front()/2;
                 line_list.points.push_back(p);
 
-                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body-arrow_length,y.front()-arrow_width);
-                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body-arrow_length,y.front()-arrow_width);
+                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front()-arrow_length,y.front()+arrow_width);
+                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front()-arrow_length,y.front()+arrow_width);
                 p.z = height.front()/2;
                 line_list.points.push_back(p);
-                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body,y.front()+0.0);
-                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+arrow_body,y.front()+0.0);
+                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front()-arrow_length,y.front()-arrow_width);
+                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front()-arrow_length,y.front()-arrow_width);
+                p.z = height.front()/2;
+                line_list.points.push_back(p);
+
+                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front()-arrow_length,y.front()-arrow_width);
+                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front()-arrow_length,y.front()-arrow_width);
+                p.z = height.front()/2;
+                line_list.points.push_back(p);
+                p.x = Box_rotate_x(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front(),y.front()+0.0);
+                p.y = Box_rotate_y(x.front(),y.front(),direction.front(),x.front()+width.front()/2+next_v.front(),y.front()+0.0);
                 p.z = height.front()/2;
                 line_list.points.push_back(p);
             }
@@ -1056,8 +1058,8 @@ void Remove_ground_and_walls(queue <float> x,queue <float> y, queue <float> z, q
             wall_y.push((wall_max_y+wall_min_y)/2);
             wall_lenth.push(sqrt(pow(wall_max_x-wall_min_x,2)+pow(wall_max_y-wall_min_y,2)));
             wall_height.push(abs(wall_max_h-wall_min_h));
-            wall_angle.push(90+atan2((wall_max_y+wall_min_y)/2,(wall_max_x+wall_min_x)/2)*180/M_PI);
-            // wall_angle.push(w_angle);
+            // wall_angle.push(90+atan2((wall_max_y+wall_min_y)/2,(wall_max_x+wall_min_x)/2)*180/M_PI);
+            wall_angle.push(w_angle);
         }else{
             // cout<<"no ground no wall"<<endl;
             for(int k=0;k<queue_size;k++){
